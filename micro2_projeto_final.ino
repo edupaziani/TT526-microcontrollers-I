@@ -57,7 +57,6 @@ void setup() {
 
   // Inicializar RFID
   mfrc522.PCD_Init();
-  //rfid.PCD_Init();
 
   WiFi.begin(ssid, password);
   Serial.print("Conectando-se ao WiFi");
@@ -68,7 +67,11 @@ void setup() {
   Serial.println("\nWiFi conectado!");
   Serial.println(WiFi.localIP());
   Serial.println();
+  Serial.println("========================================");
   Serial.println("Sistema de Controle de Acesso Iniciado");
+  Serial.println("========================================\n");
+  Serial.println("Aproxime um cartão para começar o cadastro, caso ainda não tenha, ou para ser liberado no sistema caso contrário.");
+  Serial.println("Se estiver com dúvidas, digite AJUDA para ver a lista de comandos.");
   Serial.println("Aguardando comandos...");
 }
 
@@ -105,9 +108,11 @@ void loop() {
       aguardandoNome = true;
       
       mostrarTelaNovoUsuario(id);
+      enviarTelegram("🆕 Novo cartão detectado! ID: " + id + "\nAguardando cadastro...");
     } else {
       // Usuário existente - registrar entrada/saída
       registrarMovimento(indice);
+      enviarTelegram("🔄 Movimento registrado para: " + usuarios[indice].nome);
     }
     
     mfrc522.PICC_HaltA();
@@ -116,6 +121,7 @@ void loop() {
    // Verificar se todos saíram E se há usuários cadastrados E se o relatório ainda não foi mostrado
   if (todosSairam() && totalUsuarios > 0 && !mostrandoRelatorio && !relatorioMostrado) {
     mostrarRelatorioOLED();
+    enviarRelatorioTelegram(); // Envia relatório via Telegram
     mostrandoRelatorio = true;
     relatorioMostrado = true; // Marca que o relatório já foi mostrado
     tempoInicioRelatorio = millis();
@@ -133,6 +139,60 @@ void loop() {
   }
   
   delay(100);
+}
+
+
+String urlencode(String str) {
+  String encoded = "";
+  char c;
+  for (int i = 0; i < str.length(); i++) {
+    c = str.charAt(i);
+    if (isalnum(c)) {
+      encoded += c;
+    } else {
+      encoded += '%';
+      char hex1 = (c >> 4) & 0xF;
+      char hex2 = c & 0xF;
+      encoded += char(hex1 > 9 ? hex1 - 10 + 'A' : hex1 + '0');
+      encoded += char(hex2 > 9 ? hex2 - 10 + 'A' : hex2 + '0');
+    }
+  }
+  return encoded;
+}
+
+void enviarTelegram(String mensagem) {
+  if (WiFi.status() == WL_CONNECTED) {
+    HTTPClient http;
+    String url = "https://api.telegram.org/bot" + botToken +
+                 "/sendMessage?chat_id=" + chatId +
+                 "&text=" + urlencode(mensagem);
+    http.begin(url);
+    int httpCode = http.GET();
+    if (httpCode > 0) {
+      Serial.print("Notificacao enviada. Codigo: ");
+      Serial.println(httpCode);
+    } else {
+      Serial.print("Erro ao enviar: ");
+      Serial.println(httpCode);
+    }
+    http.end();
+  } else {
+    Serial.println("WiFi nao conectado!");
+  }
+}
+
+// Função para enviar relatório completo via Telegram
+void enviarRelatorioTelegram() {
+  String mensagem = "📊 *RELATÓRIO FINAL* 📊\n";
+  mensagem += "Tempo Total Acumulado\n";
+  mensagem += "----------------------\n";
+  
+  for (int i = 0; i < totalUsuarios; i++) {
+    mensagem += "👤 " + usuarios[i].nome + ": " + formatarTempo(usuarios[i].tempoTotal) + "\n";
+  }
+  
+  mensagem += "\nTodos os usuários saíram do local.";
+  enviarTelegram(mensagem);
 }
 
 void mostrarTelaNormal() {
@@ -186,6 +246,10 @@ void cadastrarNovoUsuario(String id, String nome) {
     mostrarTelaCadastrado(nome);
     totalUsuarios++;
     mostrarStatusBluetooth();
+
+    // Enviar notificação de novo usuário para Telegram
+    enviarTelegram("✅ *NOVO USUÁRIO CADASTRADO!*\n👤 Nome: " + nome + "\n🆔 ID: " + id);
+    
     delay(2000);
     mostrarTelaNormal();
     
@@ -193,6 +257,7 @@ void cadastrarNovoUsuario(String id, String nome) {
     relatorioMostrado = false;
   } else {
     Serial.println("Erro: Limite maximo de usuarios atingido!");
+    enviarTelegram("❌ Erro: Limite máximo de usuários atingido!");
   }
 }
 
@@ -221,6 +286,11 @@ void registrarMovimento(int indice) {
     Serial.println("Tempo total acumulado: " + formatarTempo(usuarios[indice].tempoTotal));
   
     mostrarTelaSaida(usuarios[indice].nome, tempoEstaPermanencia, usuarios[indice].tempoTotal);
+
+     // Enviar notificação de saída para Telegram
+    enviarTelegram("🚪 *SAÍDA REGISTRADA*\n👤 " + usuarios[indice].nome + 
+                   "\n⏱️ Tempo desta permanência: " + formatarTempo(tempoEstaPermanencia) +
+                   "\n📊 Tempo total acumulado: " + formatarTempo(usuarios[indice].tempoTotal));
   } else {
     // Registrar entrada
     usuarios[indice].presente = true;
@@ -231,6 +301,11 @@ void registrarMovimento(int indice) {
     
     mostrarTelaEntrada(usuarios[indice].nome, usuarios[indice].tempoTotal);
     
+    // Enviar notificação de entrada para Telegram
+    enviarTelegram("🚪 *ENTRADA REGISTRADA*\n👤 " + usuarios[indice].nome + 
+                   "\n📊 Tempo total acumulado: " + formatarTempo(usuarios[indice].tempoTotal));
+
+
     // Resetar flag do relatório quando alguém entrar
     relatorioMostrado = false;
   }
