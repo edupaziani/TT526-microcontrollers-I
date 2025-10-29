@@ -15,7 +15,7 @@
 #define MISO_PIN 19
 
 //Objetos
-MFRC522 rfid(SS_PIN, RST_PIN);
+MFRC522 mfrc522(SS_PIN, RST_PIN);
 
 // Configuração do Wi-Fi
 const char* ssid = "S25+";
@@ -39,13 +39,15 @@ struct Usuario {
 const int MAX_USUARIOS = 20;
 Usuario usuarios[MAX_USUARIOS];
 int totalUsuarios = 0;
-bool relatorioMostrado = false;
+bool aguardandoNome = false;
+String idAguardandoNome = "";
+String nomeRecebido = "";
 
 // Variáveis para controle do relatório
-  bool mostrandoRelatorio = false;
-  unsigned long tempoInicioRelatorio = 0;
-  const unsigned long TEMPO_RELATORIO_MS = 10000; // 10 segundos
-  bool relatorioMostrado = false; // Para controlar se o relatório já foi mostrado
+bool mostrandoRelatorio = false;
+unsigned long tempoInicioRelatorio = 0;
+const unsigned long TEMPO_RELATORIO_MS = 10000; // 10 segundos
+bool relatorioMostrado = false; // Para controlar se o relatório já foi mostrado
 
 void setup() {
   Serial.begin(115200);
@@ -54,8 +56,8 @@ void setup() {
   SPI.begin(SCK_PIN, MISO_PIN, MOSI_PIN, SS_PIN);
 
   // Inicializar RFID
-  // mfrc522.PCD_Init();
-  rfid.PCD_Init();
+  mfrc522.PCD_Init();
+  //rfid.PCD_Init();
 
   WiFi.begin(ssid, password);
   Serial.print("Conectando-se ao WiFi");
@@ -66,11 +68,27 @@ void setup() {
   Serial.println("\nWiFi conectado!");
   Serial.println(WiFi.localIP());
   Serial.println();
-  SerialBT.println("Sistema de Controle de Acesso Iniciado");
-  SerialBT.println("Aguardando comandos...");
+  Serial.println("Sistema de Controle de Acesso Iniciado");
+  Serial.println("Aguardando comandos...");
 }
 
 void loop() {
+
+  // Verificar se há dados na Serial
+  if (Serial.available()) {
+    String mensagem = Serial.readString();
+    mensagem.trim();
+    
+    if (aguardandoNome) {
+      nomeRecebido = mensagem;
+      cadastrarNovoUsuario(idAguardandoNome, nomeRecebido);
+      aguardandoNome = false;
+      idAguardandoNome = "";
+      nomeRecebido = "";
+    } else {
+      processarComandoBluetooth(mensagem);
+    }
+  }
 
 // Verificar se há cartão RFID presente
   if (mfrc522.PICC_IsNewCardPresent() && mfrc522.PICC_ReadCardSerial()) {
@@ -81,8 +99,8 @@ void loop() {
     
     if (indice == -1) {
       // Novo usuário - solicitar cadastro
-      SerialBT.println("Novo usuario detectado! ID: " + id);
-      SerialBT.println("Por favor, digite o nome para cadastro:");
+      Serial.println("Novo usuario detectado! ID: " + id);
+      Serial.println("Por favor, digite o nome para cadastro:");
       idAguardandoNome = id;
       aguardandoNome = true;
       
@@ -174,7 +192,7 @@ void cadastrarNovoUsuario(String id, String nome) {
     // Resetar flag do relatório quando novo usuário entrar
     relatorioMostrado = false;
   } else {
-    SerialBT.println("Erro: Limite maximo de usuarios atingido!");
+    Serial.println("Erro: Limite maximo de usuarios atingido!");
   }
 }
 
@@ -259,28 +277,28 @@ void mostrarRelatorioOLED() {
   //display.setTextAlignment(TEXT_ALIGN_LEFT);
   Serial.println("RELATORIO FINAL");
   Serial.println("TOTAL ACUMULADO");
-  Serial.println(" "----------------");
+  Serial.println("----------------");
   
   int linha = 36;
-  for (int i = 0; i < totalUsuarios && linha < SCREEN_HEIGHT - 8; i++) {
+  for (int i = 0; i < totalUsuarios; i++) {
     String linhaTexto = usuarios[i].nome.substring(0, 8) + ":";
     linhaTexto += formatarTempo(usuarios[i].tempoTotal);
-    
-    display.drawString(0, linha, linhaTexto);
+    Serial.println(linhaTexto);
+    //display.drawString(0, linha, linhaTexto);
     linha += 10;
   }
   
   Serial.println("");
   
   // Também enviar relatório via Bluetooth
-  (* Serial.println("\n--- RELATORIO FINAL ---");
-  Serial.println("TEMPO TOTAL ACUMULADO");
-  for (int i = 0; i < totalUsuarios; i++) {
-    String tempoTotal = formatarTempo(usuarios[i].tempoTotal);
-    Serial.println(usuarios[i].nome + ": " + tempoTotal);
-  }
-  Serial.println("---------------------\n");
-} *)
+  // Serial.println("\n--- RELATORIO FINAL ---");
+  // Serial.println("TEMPO TOTAL ACUMULADO");
+  // for (int i = 0; i < totalUsuarios; i++) {
+  //     String tempoTotal = formatarTempo(usuarios[i].tempoTotal);
+  //     Serial.println(usuarios[i].nome + ": " + tempoTotal);
+  //   }
+  //   Serial.println("---------------------\n");
+} 
 
 void mostrarStatusBluetooth() {
   Serial.println("\n--- STATUS ATUAL ---");
@@ -341,7 +359,7 @@ void processarComandoBluetooth(String comando) {
     Serial.println("\n--- COMANDOS DISPONIVEIS ---");
     Serial.println("STATUS - Mostrar status atual");
     Serial.println("LISTA - Listar todos usuarios");
-    Seria.println("RELATORIO - Mostrar tempos totais");
+    Serial.println("RELATORIO - Mostrar tempos totais");
     Serial.println("AJUDA - Mostrar esta ajuda");
     Serial.println("---------------------\n");
   } else {
